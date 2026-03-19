@@ -4,8 +4,8 @@ import { createClient } from "@/utils/supabase/server";
 import { listSkills } from "@/lib/skills/registry";
 
 export const runtime = "nodejs";
-/** 论文生成需多轮 LLM 调用，延长超时至 15 分钟 */
-export const maxDuration = 900;
+/** Vercel Hobby 计划上限为 300 秒 */
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {

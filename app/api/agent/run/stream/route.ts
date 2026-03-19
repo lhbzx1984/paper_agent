@@ -17,7 +17,8 @@ import { embedText } from "@/lib/llm/openai";
 import { executeSkill } from "@/lib/skills/registry";
 
 export const runtime = "nodejs";
-export const maxDuration = 900;
+// Vercel Hobby 计划上限为 300 秒
+export const maxDuration = 300;
 
 function sse(data: object) {
   return `data: ${JSON.stringify(data)}\n\n`;
