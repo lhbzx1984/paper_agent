@@ -13,9 +13,9 @@ const MODULE_LABELS: Record<LLMModuleKey, string> = {
 };
 
 const DEFAULT_CONFIG: LLMModuleConfig = {
-  base_url: "https://api.deepseek.com/v1",
+  base_url: "",
   api_key: "",
-  model: "deepseek-chat",
+  model: "",
 };
 
 export default function LLMSettingsPage() {

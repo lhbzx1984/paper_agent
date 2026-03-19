@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import {
-  DEFAULT_CHAT_MODEL,
-  DEFAULT_BASE_URL,
-} from "@/lib/llm/openai";
 
 export const runtime = "nodejs";
 
@@ -16,9 +12,9 @@ export interface LLMModuleConfig {
 }
 
 export const DEFAULT_LLM_MODULE_CONFIG: LLMModuleConfig = {
-  base_url: DEFAULT_BASE_URL,
+  base_url: "",
   api_key: "",
-  model: DEFAULT_CHAT_MODEL,
+  model: "",
 };
 
 export const DEFAULT_LLM_SETTINGS: Record<LLMModuleKey, LLMModuleConfig> = {
