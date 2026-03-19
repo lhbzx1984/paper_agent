@@ -1,10 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!;
-
 export async function updateSession(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+
+  // 在部署环境中若缺少公开环境变量，避免中间件直接崩溃导致 500。
+  if (!supabaseUrl || !supabaseKey) {
+    return NextResponse.next({
+      request: { headers: request.headers },
+    });
+  }
+
   let supabaseResponse = NextResponse.next({
     request: { headers: request.headers },
   });
