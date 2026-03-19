@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { searchPapers } from "@/lib/ai4scholar/client";
+import { searchPapers } from "@/lib/openalex/client";
 
 export const runtime = "nodejs";
 
@@ -15,14 +15,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const apiKey = process.env.AI4SCHOLAR_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "AI4Scholar API 未配置，请在 .env.local 中设置 AI4SCHOLAR_API_KEY" },
-        { status: 500 }
-      );
-    }
-
     const { searchParams } = new URL(req.url);
     const query = searchParams.get("query");
     const limit = Math.min(parseInt(searchParams.get("limit") ?? "10", 10) || 10, 50);
@@ -30,6 +22,7 @@ export async function GET(req: NextRequest) {
     const year = searchParams.get("year") ?? undefined;
     const mode = (searchParams.get("mode") as "keyword" | "title" | "id") ?? "keyword";
     const openAccessOnly = searchParams.get("openAccessOnly") === "1";
+    const sort = (searchParams.get("sort") as "relevance" | "citation") ?? undefined;
 
     if (!query?.trim()) {
       return NextResponse.json(
@@ -38,25 +31,21 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const fields = "paperId,title,abstract,authors,year,citationCount,openAccessPdf,externalIds";
-    const { data, creditsRemaining, creditsCharged } = await searchPapers(
-      apiKey,
-      {
-        query: query.trim(),
-        limit,
-        offset,
-        year,
-        fields,
-        mode,
-        openAccessOnly,
-      }
-    );
+    const { data, total } = await searchPapers({
+      query: query.trim(),
+      limit,
+      offset,
+      year,
+      mode,
+      openAccessOnly,
+      sort,
+    });
 
     return NextResponse.json({
-      total: data.total ?? 0,
-      data: data.data ?? [],
-      creditsRemaining,
-      creditsCharged,
+      total,
+      data,
+      creditsRemaining: null,
+      creditsCharged: null,
     });
   } catch (err) {
     return NextResponse.json(

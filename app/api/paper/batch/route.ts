@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { getPaperBatch } from "@/lib/ai4scholar/client";
+import { getPaperDetail } from "@/lib/openalex/client";
 
 export const runtime = "nodejs";
 
@@ -15,14 +15,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const apiKey = process.env.AI4SCHOLAR_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "AI4Scholar API 未配置，请在 .env.local 中设置 AI4SCHOLAR_API_KEY" },
-        { status: 500 }
-      );
-    }
-
     const body = await req.json();
     const { ids, fields } = body as { ids?: string[]; fields?: string };
 
@@ -35,16 +27,17 @@ export async function POST(req: NextRequest) {
 
     const limitedIds = ids.slice(0, 100);
 
-    const { data, creditsRemaining, creditsCharged } = await getPaperBatch(
-      apiKey,
-      limitedIds,
-      fields
+    const data = await Promise.all(
+      limitedIds.map(async (id) => {
+        const paper = await getPaperDetail(String(id));
+        return paper;
+      })
     );
 
     return NextResponse.json({
-      data: Array.isArray(data) ? data : [],
-      creditsRemaining,
-      creditsCharged,
+      data: data.filter(Boolean),
+      creditsRemaining: null,
+      creditsCharged: null,
     });
   } catch (err) {
     return NextResponse.json(

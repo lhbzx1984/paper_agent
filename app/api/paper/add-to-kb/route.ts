@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseBufferToText } from "@/lib/parser";
 import { embedText } from "@/lib/llm/openai";
 import { upsertDocumentChunks } from "@/lib/vector/pgvector";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createClient } from "@/utils/supabase/server";
-import { getPaperDetail } from "@/lib/ai4scholar/client";
+import { getPaperDetail } from "@/lib/openalex/client";
 
 export const runtime = "nodejs";
 
@@ -31,14 +30,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const apiKey = process.env.AI4SCHOLAR_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "AI4Scholar API 未配置，请在 .env.local 中设置 AI4SCHOLAR_API_KEY" },
-        { status: 500 }
-      );
-    }
-
     const body = await req.json().catch(() => ({}));
     const paperId = body.paperId as string | null;
     const projectId = body.projectId as string | null;
@@ -50,46 +41,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const fields = "paperId,title,abstract,authors,year,openAccessPdf";
-    const { data: paper } = await getPaperDetail(apiKey, paperId.trim(), fields);
-
-    if (!paper || typeof paper !== "object") {
+    const paper = await getPaperDetail(paperId.trim());
+    if (!paper) {
       return NextResponse.json({ error: "未找到该论文" }, { status: 404 });
     }
 
-    const p = paper as {
-      paperId?: string;
-      title?: string;
-      abstract?: string;
-      openAccessPdf?: { url?: string };
-    };
-
     let text: string;
-    const pdfUrl = p.openAccessPdf?.url?.trim();
-
-    if (pdfUrl) {
-      const res = await fetch(pdfUrl);
-      if (!res.ok) {
-        throw new Error(`下载 PDF 失败: ${res.status}`);
-      }
-      const arrayBuffer = await res.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      try {
-        text = await parseBufferToText(buffer, "application/pdf");
-      } catch (parseErr) {
-        const msg = parseErr instanceof Error ? parseErr.message : "解析失败";
-        return NextResponse.json({ error: `PDF 解析失败: ${msg}` }, { status: 400 });
-      }
-    } else {
-      text = p.abstract?.trim() ?? "";
-      if (!text) {
-        return NextResponse.json(
-          { error: "该论文无开放获取 PDF，且无摘要可用" },
-          { status: 400 }
-        );
-      }
-      text = `标题: ${p.title ?? "未知"}\n\n摘要:\n${text}`;
+    // OpenAlex 目前优先使用 abstract（由 inverted index 还原），避免依赖付费/带配额的 PDF 内容下载
+    text = paper.abstract?.trim() ?? "";
+    if (!text) {
+      return NextResponse.json(
+        { error: "该论文摘要不可用（OpenAlex 未返回可还原的 abstract）" },
+        { status: 400 }
+      );
     }
+    text = `标题: ${paper.title ?? "未知"}\n\n摘要:\n${text}`;
 
     if (!text?.trim()) {
       return NextResponse.json(
@@ -99,7 +65,7 @@ export async function POST(req: NextRequest) {
     }
 
     const db = await createSupabaseServerClient();
-    const docName = (p.title ?? paperId).slice(0, 200);
+    const docName = (paper.title ?? paperId).slice(0, 200);
 
     const { data: doc, error: docError } = await db
       .from("documents")
@@ -107,7 +73,7 @@ export async function POST(req: NextRequest) {
         project_id: projectId,
         name: docName,
         size: text.length,
-        mime_type: pdfUrl ? "application/pdf" : "text/plain",
+        mime_type: "text/plain",
       })
       .select("id")
       .single();
@@ -150,7 +116,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       id: doc.id,
       chunks: rawChunks.length,
-      source: pdfUrl ? "pdf" : "abstract",
+      source: "abstract",
     });
   } catch (err) {
     return NextResponse.json(

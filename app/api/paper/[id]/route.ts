@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { getPaperDetail } from "@/lib/ai4scholar/client";
+import { getPaperDetail } from "@/lib/openalex/client";
 
 export const runtime = "nodejs";
 
@@ -18,32 +18,20 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const apiKey = process.env.AI4SCHOLAR_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "AI4Scholar API 未配置，请在 .env.local 中设置 AI4SCHOLAR_API_KEY" },
-        { status: 500 }
-      );
-    }
-
     const { id } = await params;
     if (!id?.trim()) {
       return NextResponse.json({ error: "论文 ID 不能为空" }, { status: 400 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const fields = searchParams.get("fields") ?? undefined;
-
-    const { data, creditsRemaining, creditsCharged } = await getPaperDetail(
-      apiKey,
-      id.trim(),
-      fields
-    );
+    const paper = await getPaperDetail(id.trim());
+    if (!paper) {
+      return NextResponse.json({ error: "未找到该论文" }, { status: 404 });
+    }
 
     return NextResponse.json({
-      data,
-      creditsRemaining,
-      creditsCharged,
+      data: paper,
+      creditsRemaining: null,
+      creditsCharged: null,
     });
   } catch (err) {
     return NextResponse.json(

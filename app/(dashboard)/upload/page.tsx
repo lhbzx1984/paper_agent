@@ -120,6 +120,7 @@ function PaperSearchSection({
   const [year, setYear] = useState("");
   const [mode, setMode] = useState<SearchMode>("keyword");
   const [openAccessOnly, setOpenAccessOnly] = useState(false);
+  const [sortMode, setSortMode] = useState<"relevance" | "citation">("citation");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<PaperResult[]>([]);
   const [total, setTotal] = useState<number | null>(null);
@@ -150,6 +151,7 @@ function PaperSearchSection({
         limit: String(pageSize),
         offset: String((pageNum - 1) * pageSize),
         mode,
+        sort: sortMode,
       };
       if (year) params.year = year;
       if (openAccessOnly) params.openAccessOnly = "1";
@@ -291,6 +293,15 @@ function PaperSearchSection({
           />
           仅开放获取
         </label>
+        <select
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as "relevance" | "citation")}
+          className="rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-zinc-900 dark:text-zinc-100"
+          disabled={loading}
+        >
+          <option value="relevance">相关度排序</option>
+          <option value="citation">引用数排序</option>
+        </select>
         <button
           type="submit"
           disabled={loading || !query.trim()}
