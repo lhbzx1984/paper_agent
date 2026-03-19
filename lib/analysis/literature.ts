@@ -76,6 +76,8 @@ function sortChunksByIndex<T extends { metadata?: { index?: number } }>(chunks: 
   });
 }
 
+type AnalysisChunk = { content: string; metadata?: { index?: number } };
+
 export async function runLiteratureAnalysis(params: {
   projectId: string;
   documentId?: string;
@@ -86,7 +88,7 @@ export async function runLiteratureAnalysis(params: {
   const { projectId, documentId, focus, llmConfig } = params;
   const model = llmConfig?.model ?? params.model ?? DEFAULT_CHAT_MODEL;
 
-  let chunks: { content: string; metadata?: { index?: number } }[];
+  let chunks: AnalysisChunk[];
   if (documentId) {
     chunks = sortChunksByIndex(await getChunksByDocument(documentId));
   } else {
@@ -94,11 +96,11 @@ export async function runLiteratureAnalysis(params: {
       focus ||
       "研究主题、方法、创新点、实验设计、应用场景、未来工作";
     const embedding = await embedText(query);
-    let cs = await searchSimilarChunks({
+    let cs: AnalysisChunk[] = (await searchSimilarChunks({
       projectId,
       embedding,
       limit: 12,
-    });
+    })).map((c) => ({ content: c.content, metadata: c.metadata as { index?: number } | undefined }));
     if (cs.length === 0) {
       cs = await getChunksByProject(projectId, 24);
     }
@@ -214,7 +216,7 @@ export async function runLiteratureAnalysisStream(params: {
   const { projectId, documentId, focus, onSection, llmConfig } = params;
   const model = llmConfig?.model ?? params.model ?? DEFAULT_CHAT_MODEL;
 
-  let chunks: { content: string; metadata?: { index?: number } }[];
+  let chunks: AnalysisChunk[];
   if (documentId) {
     chunks = sortChunksByIndex(await getChunksByDocument(documentId));
   } else {
@@ -222,11 +224,11 @@ export async function runLiteratureAnalysisStream(params: {
       focus ||
       "研究主题、方法、创新点、实验设计、应用场景、未来工作";
     const embedding = await embedText(query);
-    let cs = await searchSimilarChunks({
+    let cs: AnalysisChunk[] = (await searchSimilarChunks({
       projectId,
       embedding,
       limit: 12,
-    });
+    })).map((c) => ({ content: c.content, metadata: c.metadata as { index?: number } | undefined }));
     if (cs.length === 0) {
       cs = await getChunksByProject(projectId, 24);
     }

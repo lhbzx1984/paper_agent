@@ -9,12 +9,22 @@ export async function GET() {
   try {
     const supabase = await createSupabaseServerClient();
 
-    // 查询 embedding 列定义
-    const { data: colData, error: colError } = await supabase.rpc("exec_sql", {
-      sql: `SELECT udt_name, character_maximum_length 
+    // 查询 embedding 列定义（某些环境没有 exec_sql，需容错）
+    let colData: unknown = null;
+    let colError: { message: string } | null = null;
+    try {
+      const rpcRes = await supabase.rpc("exec_sql", {
+        sql: `SELECT udt_name, character_maximum_length 
         FROM information_schema.columns 
         WHERE table_schema = 'public' AND table_name = 'document_chunks' AND column_name = 'embedding'`,
-    }).catch(() => ({ data: null, error: { message: "RPC not available" } }));
+      });
+      colData = rpcRes.data;
+      colError = rpcRes.error
+        ? { message: rpcRes.error.message }
+        : null;
+    } catch {
+      colError = { message: "RPC not available" };
+    }
 
     // Supabase 可能没有 exec_sql，改用 raw SQL 通过 REST
     const { data: schemaData } = await supabase
@@ -36,6 +46,8 @@ export async function GET() {
       embeddingApiDimension: embedDim,
       note: "Zhipu 应返回 1024 维；迁移 004 后 DB 应为 vector(1024)",
     };
+    if (colData) check.columnMeta = colData;
+    if (colError) check.columnMetaError = colError.message;
 
     if (schemaData && Array.isArray(schemaData) && schemaData.length > 0) {
       const first = schemaData[0] as { embedding?: unknown };
