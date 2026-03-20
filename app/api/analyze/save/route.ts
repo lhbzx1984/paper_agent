@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createHash } from "crypto";
 
 export const runtime = "nodejs";
+
+const WHOLE_PROJECT_SET_HASH = "whole_project";
+
+function computeDocumentSetHash(documentIds: string[]) {
+  const normalized = documentIds.map((d) => d.trim()).filter(Boolean).sort();
+  return createHash("sha256").update(normalized.join(",")).digest("hex");
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,6 +26,7 @@ export async function POST(req: NextRequest) {
     const {
       projectId,
       documentId,
+      documentIds,
       documentName,
       innovations,
       researchDirections,
@@ -31,6 +40,7 @@ export async function POST(req: NextRequest) {
     } = body as {
       projectId?: string;
       documentId?: string | null;
+      documentIds?: string[];
       documentName?: string;
       innovations?: string;
       researchDirections?: string;
@@ -58,23 +68,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "项目不存在或无权访问" }, { status: 403 });
     }
 
-    const docId = documentId?.trim() || null;
+    const normalizedDocIds = Array.isArray(documentIds)
+      ? documentIds.map((d) => d.trim()).filter(Boolean)
+      : [];
+    const isMulti = normalizedDocIds.length > 0;
+
+    const docId = isMulti ? null : documentId?.trim() || null;
+    const docSetHash = isMulti
+      ? computeDocumentSetHash(normalizedDocIds)
+      : docId == null
+        ? WHOLE_PROJECT_SET_HASH
+        : null;
 
     let query = supabase
       .from("document_analysis")
       .select("id")
       .eq("project_id", projectId)
       .eq("user_id", user.id);
-    if (docId == null) {
-      query = query.is("document_id", null);
+    if (isMulti) {
+      query = query.eq("document_set_hash", docSetHash);
+    } else if (docId == null) {
+      query = query.eq("document_set_hash", WHOLE_PROJECT_SET_HASH);
     } else {
-      query = query.eq("document_id", docId);
+      query = query.eq("document_id", docId).is("document_set_hash", null);
     }
     const { data: existing } = await query.maybeSingle();
+
+    const docIdsForRow = isMulti
+      ? normalizedDocIds.slice().sort()
+      : [];
 
     const row = {
       project_id: projectId,
       document_id: docId,
+      document_ids: docIdsForRow,
+      document_set_hash: docSetHash,
       user_id: user.id,
       document_name: documentName?.trim() || null,
       innovations: innovations ?? null,

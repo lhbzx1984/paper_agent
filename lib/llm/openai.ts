@@ -1,20 +1,8 @@
 import OpenAI from "openai";
 
-const deepseekKey = process.env.DEEPSEEK_API_KEY;
-const deepseekBase = process.env.DEEPSEEK_API_BASE ?? "https://api.deepseek.com/v1";
-
-// Chat：仅使用 DeepSeek
-const chatClient = deepseekKey
-  ? new OpenAI({ apiKey: deepseekKey, baseURL: deepseekBase })
-  : null;
-
 // 嵌入模型：仅使用智谱 Embedding-3
 const zhipuKey = process.env.ZHIPU_API_KEY;
 const ZHIPU_EMBED_BASE = "https://open.bigmodel.cn/api/paas/v4";
-
-export const DEFAULT_CHAT_MODEL = "deepseek-chat";
-export const FALLBACK_CHAT_MODEL = "deepseek-reasoner";
-export const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
 
 /** 可选 LLM 配置（用户设置覆盖） */
 export interface LLMConfig {
@@ -33,9 +21,9 @@ function isTimeoutError(e: unknown): boolean {
 }
 
 function getClient(config?: LLMConfig): OpenAI | null {
-  const key = (config?.apiKey?.trim() || deepseekKey) || null;
-  const base = config?.baseURL?.trim() || deepseekBase;
-  if (!key) return null;
+  const key = config?.apiKey?.trim();
+  const base = config?.baseURL?.trim();
+  if (!key || !base) return null;
   return new OpenAI({ apiKey: key, baseURL: base });
 }
 
@@ -46,12 +34,19 @@ export async function generateText(params: {
   apiKey?: string;
   baseURL?: string;
 }) {
-  const client = getClient({ apiKey: params.apiKey, baseURL: params.baseURL }) ?? chatClient;
+  const client = getClient({ apiKey: params.apiKey, baseURL: params.baseURL });
   if (!client) {
-    throw new Error("DEEPSEEK_API_KEY 或大模型设置中的 api_key 未配置");
+    throw new Error(
+      "请在对应模块的‘大模型设置’中填写 api_key 和 base_url（不再使用环境变量回退）。"
+    );
   }
 
-  const { system, prompt, model = DEFAULT_CHAT_MODEL } = params;
+  const model = params.model?.trim();
+  if (!model) {
+    throw new Error("请在对应模块的‘大模型设置’中填写 model（不再使用默认模型）。");
+  }
+
+  const { system, prompt } = params;
 
   try {
     const res = await client.chat.completions.create({
@@ -64,9 +59,8 @@ export async function generateText(params: {
     return res.choices[0]?.message.content ?? "";
   } catch (e) {
     if (isTimeoutError(e)) {
-      const alt =
-        model === DEFAULT_CHAT_MODEL ? FALLBACK_CHAT_MODEL : DEFAULT_CHAT_MODEL;
-      return generateText({ ...params, model: alt });
+      // 超时：只重试一次，且不切换到任何默认模型
+      return generateText({ ...params, model });
     }
     throw e;
   }
@@ -82,12 +76,19 @@ export async function* generateTextStream(
     baseURL?: string;
   } & { _noRetry?: boolean },
 ): AsyncGenerator<string, string, unknown> {
-  const client = getClient({ apiKey: params.apiKey, baseURL: params.baseURL }) ?? chatClient;
+  const client = getClient({ apiKey: params.apiKey, baseURL: params.baseURL });
   if (!client) {
-    throw new Error("DEEPSEEK_API_KEY 或大模型设置中的 api_key 未配置");
+    throw new Error(
+      "请在对应模块的‘大模型设置’中填写 api_key 和 base_url（不再使用环境变量回退）。"
+    );
   }
 
-  const { system, prompt, model = DEFAULT_CHAT_MODEL, _noRetry } = params;
+  const model = params.model?.trim();
+  if (!model) {
+    throw new Error("请在对应模块的‘大模型设置’中填写 model（不再使用默认模型）。");
+  }
+
+  const { system, prompt, _noRetry } = params;
   let full = "";
 
   const doStream = async function* () {
@@ -115,12 +116,9 @@ export async function* generateTextStream(
     }
   } catch (e) {
     if (!_noRetry && isTimeoutError(e)) {
-      const alt =
-        model === DEFAULT_CHAT_MODEL ? FALLBACK_CHAT_MODEL : DEFAULT_CHAT_MODEL;
       full = "";
       for await (const t of generateTextStream({
         ...params,
-        model: alt,
         _noRetry: true,
       })) {
         full += t;

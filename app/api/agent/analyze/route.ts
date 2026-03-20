@@ -10,8 +10,10 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { projectId, model, focus } = body as {
+    const { projectId, documentId, documentIds, model, focus } = body as {
       projectId: string;
+      documentId?: string;
+      documentIds?: string[];
       model?: string;
       focus?: string;
     };
@@ -45,6 +47,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const multiIds =
+      Array.isArray(documentIds) && documentIds.length
+        ? [...new Set(documentIds.map((d) => d.trim()).filter(Boolean))]
+        : [];
+
+    let documentsMeta: { id: string; name?: string | null }[] | undefined;
+    if (multiIds.length > 0) {
+      const { data: docs, error: docsErr } = await supabase
+        .from("documents")
+        .select("id,name")
+        .in("id", multiIds)
+        .eq("project_id", projectId);
+
+      if (docsErr) {
+        return NextResponse.json({ error: docsErr.message }, { status: 400 });
+      }
+
+      const found = docs?.map((d) => d.id) ?? [];
+      if (found.length !== multiIds.length) {
+        return NextResponse.json(
+          { error: "部分文档不存在或不属于当前知识库" },
+          { status: 400 }
+        );
+      }
+      documentsMeta = docs ?? [];
+    } else if (documentId?.trim()) {
+      const { data: doc } = await supabase
+        .from("documents")
+        .select("id, project_id")
+        .eq("id", documentId.trim())
+        .single();
+      if (!doc || doc.project_id !== projectId) {
+        return NextResponse.json(
+          { error: "文档不存在或不属于当前知识库" },
+          { status: 400 }
+        );
+      }
+    }
+
     const { data: settingsRow } = await supabase
       .from("user_llm_settings")
       .select("settings")
@@ -67,6 +108,9 @@ export async function POST(req: NextRequest) {
       projectId,
       model,
       focus,
+      documentId: multiIds.length === 0 ? documentId?.trim() || undefined : undefined,
+      documentIds: multiIds.length > 0 ? multiIds : undefined,
+      documents: documentsMeta,
       llmConfig: llmConfigForLiterature,
     });
 

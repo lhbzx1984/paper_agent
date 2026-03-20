@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createHash } from "crypto";
 
 export const runtime = "nodejs";
+
+const WHOLE_PROJECT_SET_HASH = "whole_project";
+
+function computeDocumentSetHash(documentIds: string[]) {
+  const normalized = documentIds.map((d) => d.trim()).filter(Boolean).sort();
+  return createHash("sha256").update(normalized.join(",")).digest("hex");
+}
 
 /** 获取已保存的文献分析，供研究工作台调用 */
 export async function GET(req: NextRequest) {
@@ -18,6 +26,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get("projectId");
     const documentId = searchParams.get("documentId");
+    const documentIdsParam = searchParams.get("documentIds");
+    const documentSetHashParam = searchParams.get("documentSetHash");
 
     if (!projectId) {
       return NextResponse.json(
@@ -33,9 +43,16 @@ export async function GET(req: NextRequest) {
       .eq("user_id", user.id);
 
     if (documentId) {
-      query = query.eq("document_id", documentId);
+      query = query.eq("document_id", documentId).is("document_set_hash", null);
+    } else if (documentSetHashParam) {
+      query = query.eq("document_set_hash", documentSetHashParam);
+    } else if (documentIdsParam) {
+      const ids = documentIdsParam.split(",").map((d) => d.trim()).filter(Boolean);
+      const hash = computeDocumentSetHash(ids);
+      query = query.eq("document_set_hash", hash);
     } else {
-      query = query.is("document_id", null);
+      // 默认：整库分析（全部文档）
+      query = query.eq("document_set_hash", WHOLE_PROJECT_SET_HASH);
     }
 
     const { data, error } = await query.maybeSingle();
@@ -89,6 +106,8 @@ export async function DELETE(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get("projectId");
     const documentId = searchParams.get("documentId");
+    const documentIdsParam = searchParams.get("documentIds");
+    const documentSetHashParam = searchParams.get("documentSetHash");
 
     if (!projectId) {
       return NextResponse.json(
@@ -104,9 +123,15 @@ export async function DELETE(req: NextRequest) {
       .eq("user_id", user.id);
 
     if (documentId) {
-      query = query.eq("document_id", documentId);
+      query = query.eq("document_id", documentId).is("document_set_hash", null);
+    } else if (documentSetHashParam) {
+      query = query.eq("document_set_hash", documentSetHashParam);
+    } else if (documentIdsParam) {
+      const ids = documentIdsParam.split(",").map((d) => d.trim()).filter(Boolean);
+      const hash = computeDocumentSetHash(ids);
+      query = query.eq("document_set_hash", hash);
     } else {
-      query = query.is("document_id", null);
+      query = query.eq("document_set_hash", WHOLE_PROJECT_SET_HASH);
     }
 
     const { error } = await query;

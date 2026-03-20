@@ -38,9 +38,10 @@ export async function POST(req: NextRequest) {
         if (aborted) return;
 
         const body = await req.json();
-        const { projectId, documentId, model, focus } = body as {
+        const { projectId, documentId, documentIds, model, focus } = body as {
           projectId?: string;
           documentId?: string;
+          documentIds?: string[];
           model?: string;
           focus?: string;
         };
@@ -74,7 +75,34 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        if (documentId?.trim()) {
+        const multiIds =
+          Array.isArray(documentIds) && documentIds.length
+            ? [...new Set(documentIds.map((d) => d.trim()).filter(Boolean))]
+            : [];
+
+        let documentsMeta: { id: string; name?: string | null }[] | undefined;
+        if (multiIds.length > 0) {
+          const { data: docs, error: docsErr } = await supabase
+            .from("documents")
+            .select("id,name")
+            .in("id", multiIds)
+            .eq("project_id", projectId);
+
+          if (docsErr) {
+            send({ type: "error", error: docsErr.message });
+            controller.close();
+            return;
+          }
+
+          const found = docs?.map((d) => d.id) ?? [];
+          if (found.length !== multiIds.length) {
+            send({ type: "error", error: "部分文档不存在或不属于当前知识库" });
+            controller.close();
+            return;
+          }
+
+          documentsMeta = docs ?? [];
+        } else if (documentId?.trim()) {
           const { data: doc } = await supabase
             .from("documents")
             .select("id, project_id")
@@ -116,7 +144,9 @@ export async function POST(req: NextRequest) {
 
         const result = await runLiteratureAnalysisStream({
           projectId,
-          documentId: documentId?.trim() || undefined,
+          documentId: multiIds.length === 0 ? documentId?.trim() || undefined : undefined,
+          documentIds: multiIds.length > 0 ? multiIds : undefined,
+          documents: documentsMeta,
           model,
           focus,
           llmConfig: llmConfigForLiterature,

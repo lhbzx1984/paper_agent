@@ -74,6 +74,27 @@ export default function LLMSettingsPage() {
     });
   }
 
+  function clearModule(key: LLMModuleKey) {
+    setSettings((prev) => {
+      if (!prev) return null;
+      const next = { ...prev };
+      next[key] = { ...DEFAULT_CONFIG };
+      return next;
+    });
+    setError(null);
+    setSuccess(false);
+  }
+
+  function clearAll() {
+    setSettings({
+      literature_analysis: { ...DEFAULT_CONFIG },
+      workspace: { ...DEFAULT_CONFIG },
+      skills: { ...DEFAULT_CONFIG },
+    });
+    setError(null);
+    setSuccess(false);
+  }
+
   if (loading) {
     return (
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-8 text-center text-zinc-500">
@@ -95,7 +116,7 @@ export default function LLMSettingsPage() {
           大模型设置
         </h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          为不同功能模块配置 base_url、api_key 和 model，留空则使用环境变量
+          为不同功能模块配置 `base_url`、`api_key` 和 `model`。如果相关字段为空，文献分析/研究工作台/技能调用将无法正常工作。
         </p>
       </div>
 
@@ -103,14 +124,33 @@ export default function LLMSettingsPage() {
         onSubmit={handleSave}
         className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 space-y-8"
       >
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            onClick={clearAll}
+            className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-sm text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+          >
+            清空全部
+          </button>
+        </div>
+
         {(Object.keys(MODULE_LABELS) as LLMModuleKey[]).map((key) => (
           <div
             key={key}
             className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-4 space-y-4"
           >
-            <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
-              {MODULE_LABELS[key]}
-            </h3>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+                {MODULE_LABELS[key]}
+              </h3>
+              <button
+                type="button"
+                onClick={() => clearModule(key)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
+                清空
+              </button>
+            </div>
             <div className="grid gap-4 sm:grid-cols-1">
               <div>
                 <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
@@ -122,7 +162,6 @@ export default function LLMSettingsPage() {
                   onChange={(e) =>
                     updateModule(key, "base_url", e.target.value)
                   }
-                  placeholder="https://api.deepseek.com/v1"
                   className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-zinc-900 dark:text-zinc-100"
                 />
               </div>
@@ -136,7 +175,6 @@ export default function LLMSettingsPage() {
                   onChange={(e) =>
                     updateModule(key, "api_key", e.target.value)
                   }
-                  placeholder="sk-xxx（留空使用环境变量）"
                   className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-zinc-900 dark:text-zinc-100"
                 />
               </div>
@@ -150,7 +188,6 @@ export default function LLMSettingsPage() {
                   onChange={(e) =>
                     updateModule(key, "model", e.target.value)
                   }
-                  placeholder="deepseek-chat"
                   className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-zinc-900 dark:text-zinc-100"
                 />
               </div>

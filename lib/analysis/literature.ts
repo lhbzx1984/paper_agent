@@ -1,6 +1,5 @@
 import {
   generateText,
-  DEFAULT_CHAT_MODEL,
   type LLMConfig,
 } from "../llm/openai";
 import {
@@ -60,6 +59,8 @@ const ANALYSIS_PROMPTS = {
   },
 } as const;
 
+type DocumentMeta = { id: string; name?: string | null };
+
 /** 改进意见依赖阶段一分析结果，单独定义 */
 const IMPROVEMENT_SUGGESTIONS_PROMPT = {
   system:
@@ -78,41 +79,123 @@ function sortChunksByIndex<T extends { metadata?: { index?: number } }>(chunks: 
 
 type AnalysisChunk = { content: string; metadata?: { index?: number } };
 
+const TOTAL_CTX_CHARS = 8000;
+
+async function buildRagContextForSelection(params: {
+  projectId: string;
+  documentId?: string;
+  documentIds?: string[];
+  focus?: string;
+  documents?: DocumentMeta[];
+}) {
+  const { projectId, documentId, documentIds, focus, documents } = params;
+
+  const selectedIds =
+    documentIds && documentIds.length
+      ? [...new Set(documentIds.map((d) => d.trim()).filter(Boolean))]
+      : [];
+
+  // 多篇综合：按文档逐块拼接，并把字符预算按“非空文献数”平均分摊
+  if (selectedIds.length > 0) {
+    const nameMap = new Map((documents ?? []).map((d) => [d.id, d.name ?? d.id]));
+    const docsWithChunks = await Promise.all(
+      selectedIds.map(async (id) => {
+        const chunks = sortChunksByIndex(await getChunksByDocument(id));
+        return {
+          id,
+          name: nameMap.get(id) ?? id,
+          chunks,
+        };
+      })
+    );
+
+    const nonEmptyDocs = docsWithChunks.filter((d) => d.chunks.length > 0);
+    if (nonEmptyDocs.length === 0) {
+      return {
+        ragContext: "",
+        mode: "multi" as const,
+        multiEmptyIds: selectedIds,
+      };
+    }
+
+    const perDocBudget = Math.max(800, Math.floor(TOTAL_CTX_CHARS / nonEmptyDocs.length));
+    const emptyIds = docsWithChunks.filter((d) => d.chunks.length === 0).map((d) => d.id);
+    const note = emptyIds.length ? `（提示：以下文献暂无解析内容：${emptyIds.join("、")}）\n\n` : "";
+
+    const parts = nonEmptyDocs.map(({ name, chunks }) => {
+      const content = chunks.map((c) => c.content).join("\n\n---\n\n");
+      const docPart = `## 文献：${name}\n\n${content}`;
+      return docPart.slice(0, perDocBudget);
+    });
+
+    return {
+      ragContext: note + parts.join("\n\n---\n\n"),
+      mode: "multi" as const,
+    };
+  }
+
+  // 单篇
+  if (documentId) {
+    const chunks = sortChunksByIndex(await getChunksByDocument(documentId));
+    const ragContext = chunks.map((c) => c.content).join("\n\n---\n\n");
+    return { ragContext, mode: "single" as const };
+  }
+
+  // 整库/知识库整体
+  const query =
+    focus ||
+    "研究主题、方法、创新点、实验设计、应用场景、未来工作";
+  const embedding = await embedText(query);
+  let cs: AnalysisChunk[] = (await searchSimilarChunks({
+    projectId,
+    embedding,
+    limit: 12,
+  })).map((c) => ({ content: c.content, metadata: c.metadata as { index?: number } | undefined }));
+  if (cs.length === 0) {
+    cs = await getChunksByProject(projectId, 24);
+  }
+  if (cs.length === 0) {
+    cs = await getChunksByProjectViaDocuments(projectId, 24);
+  }
+  const ragContext = cs.map((c) => c.content).join("\n\n---\n\n");
+  return { ragContext, mode: "project" as const };
+}
+
 export async function runLiteratureAnalysis(params: {
   projectId: string;
   documentId?: string;
+  documentIds?: string[];
+  documents?: DocumentMeta[];
   model?: string;
   focus?: string;
   llmConfig?: LLMConfig;
 }): Promise<LiteratureAnalysisResult> {
-  const { projectId, documentId, focus, llmConfig } = params;
-  const model = llmConfig?.model ?? params.model ?? DEFAULT_CHAT_MODEL;
+  const { projectId, documentId, documentIds, documents, focus, llmConfig } = params;
+  const model = llmConfig?.model ?? params.model;
 
-  let chunks: AnalysisChunk[];
-  if (documentId) {
-    chunks = sortChunksByIndex(await getChunksByDocument(documentId));
-  } else {
-    const query =
-      focus ||
-      "研究主题、方法、创新点、实验设计、应用场景、未来工作";
-    const embedding = await embedText(query);
-    let cs: AnalysisChunk[] = (await searchSimilarChunks({
-      projectId,
-      embedding,
-      limit: 12,
-    })).map((c) => ({ content: c.content, metadata: c.metadata as { index?: number } | undefined }));
-    if (cs.length === 0) {
-      cs = await getChunksByProject(projectId, 24);
-    }
-    if (cs.length === 0) {
-      cs = await getChunksByProjectViaDocuments(projectId, 24);
-    }
-    chunks = cs;
-  }
-  const ragContext = chunks.map((c) => c.content).join("\n\n---\n\n");
+  const selection = await buildRagContextForSelection({
+    projectId,
+    documentId,
+    documentIds,
+    focus,
+    documents,
+  });
+  const ragContext = selection.ragContext;
 
   if (!ragContext.trim()) {
-    if (documentId) {
+    if (selection.mode === "multi") {
+      const hint =
+        "所选多篇文献均暂无解析内容。请前往知识库检查这些文献是否已成功上传并解析，或尝试重新上传。";
+      return {
+        innovations: hint,
+        researchDirections: hint,
+        paperStructure: hint,
+        experimentAndVerification: hint,
+        improvementsOrShortcomings: hint,
+        improvementSuggestions: hint,
+      };
+    }
+    if (selection.mode === "single") {
       const emptyHint =
         "该文档暂无解析内容。请前往知识库检查该文档是否已成功上传并解析，或尝试重新上传。";
       return {
@@ -152,8 +235,9 @@ export async function runLiteratureAnalysis(params: {
     };
   }
 
-  const ctx = ragContext.slice(0, 8000);
+  const ctx = ragContext.slice(0, TOTAL_CTX_CHARS);
   const result: LiteratureAnalysisResult = {};
+  const isMulti = selection.mode === "multi";
 
   // 阶段一：5 项并行
   const phase1Entries = Object.entries(ANALYSIS_PROMPTS) as [
@@ -163,7 +247,10 @@ export async function runLiteratureAnalysis(params: {
   const phase1Outputs = await Promise.all(
     phase1Entries.map(async ([key, { system, task }]) => {
       try {
-        const prompt = `【任务】${task}\n\n【文献内容】\n${ctx}\n\n请基于以上文献内容完成分析，使用 Markdown 格式输出结构清晰、可直接参考的结果。`;
+        const modeHint = isMulti
+          ? "【模式】多篇文献综合分析：请综合共同点与差异，避免把不同文献当作同一篇来描述。"
+          : "【模式】单篇/整库分析：请基于所给文献内容给出结论。";
+        const prompt = `${modeHint}\n\n【任务】${task}\n\n【文献内容】\n${ctx}\n\n请基于以上文献内容完成分析，使用 Markdown 格式输出结构清晰、可直接参考的结果。`;
         const text = await generateText({
           system,
           prompt,
@@ -208,39 +295,39 @@ export async function runLiteratureAnalysis(params: {
 export async function runLiteratureAnalysisStream(params: {
   projectId: string;
   documentId?: string;
+  documentIds?: string[];
+  documents?: DocumentMeta[];
   model?: string;
   focus?: string;
   llmConfig?: LLMConfig;
   onSection?: (key: keyof LiteratureAnalysisResult, text: string) => void;
 }): Promise<LiteratureAnalysisResult> {
-  const { projectId, documentId, focus, onSection, llmConfig } = params;
-  const model = llmConfig?.model ?? params.model ?? DEFAULT_CHAT_MODEL;
+  const { projectId, documentId, documentIds, documents, focus, onSection, llmConfig } = params;
+  const model = llmConfig?.model ?? params.model;
 
-  let chunks: AnalysisChunk[];
-  if (documentId) {
-    chunks = sortChunksByIndex(await getChunksByDocument(documentId));
-  } else {
-    const query =
-      focus ||
-      "研究主题、方法、创新点、实验设计、应用场景、未来工作";
-    const embedding = await embedText(query);
-    let cs: AnalysisChunk[] = (await searchSimilarChunks({
-      projectId,
-      embedding,
-      limit: 12,
-    })).map((c) => ({ content: c.content, metadata: c.metadata as { index?: number } | undefined }));
-    if (cs.length === 0) {
-      cs = await getChunksByProject(projectId, 24);
-    }
-    if (cs.length === 0) {
-      cs = await getChunksByProjectViaDocuments(projectId, 24);
-    }
-    chunks = cs;
-  }
-  const ragContext = chunks.map((c) => c.content).join("\n\n---\n\n");
+  const selection = await buildRagContextForSelection({
+    projectId,
+    documentId,
+    documentIds,
+    focus,
+    documents,
+  });
+  const ragContext = selection.ragContext;
 
   if (!ragContext.trim()) {
-    if (documentId) {
+    if (selection.mode === "multi") {
+      const hint =
+        "所选多篇文献均暂无解析内容。请前往知识库检查这些文献是否已成功上传并解析，或尝试重新上传。";
+      return {
+        innovations: hint,
+        researchDirections: hint,
+        paperStructure: hint,
+        experimentAndVerification: hint,
+        improvementsOrShortcomings: hint,
+        improvementSuggestions: hint,
+      };
+    }
+    if (selection.mode === "single") {
       const emptyHint =
         "该文档暂无解析内容。请前往知识库检查该文档是否已成功上传并解析，或尝试重新上传。";
       return {
@@ -281,8 +368,9 @@ export async function runLiteratureAnalysisStream(params: {
     };
   }
 
-  const ctx = ragContext.slice(0, 8000);
+  const ctx = ragContext.slice(0, TOTAL_CTX_CHARS);
   const result: LiteratureAnalysisResult = {};
+  const isMulti = selection.mode === "multi";
   const phase1Entries = Object.entries(ANALYSIS_PROMPTS) as [
     keyof typeof ANALYSIS_PROMPTS,
     (typeof ANALYSIS_PROMPTS)[keyof typeof ANALYSIS_PROMPTS],
@@ -292,7 +380,10 @@ export async function runLiteratureAnalysisStream(params: {
   await Promise.all(
     phase1Entries.map(async ([key, { system, task }]) => {
       try {
-        const prompt = `【任务】${task}\n\n【文献内容】\n${ctx}\n\n请基于以上文献内容完成分析，使用 Markdown 格式输出结构清晰、可直接参考的结果。`;
+        const modeHint = isMulti
+          ? "【模式】多篇文献综合分析：请综合共同点与差异，避免把不同文献当作同一篇来描述。"
+          : "【模式】单篇/整库分析：请基于所给文献内容给出结论。";
+        const prompt = `${modeHint}\n\n【任务】${task}\n\n【文献内容】\n${ctx}\n\n请基于以上文献内容完成分析，使用 Markdown 格式输出结构清晰、可直接参考的结果。`;
         const text = await generateText({
           system,
           prompt,

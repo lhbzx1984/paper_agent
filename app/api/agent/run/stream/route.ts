@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { listSkills } from "@/lib/skills/registry";
-import { DEFAULT_CHAT_MODEL } from "@/lib/llm/openai";
 import { generateText, generateTextStream } from "@/lib/llm/openai";
 import type { LLMModuleConfig } from "@/app/api/settings/llm/route";
 import {
@@ -72,9 +71,9 @@ export async function POST(req: NextRequest) {
 
         const supabase = await createClient();
         const { data: { user } } = await supabase.auth.getUser();
-        let model = bodyModel;
-        let llmConfig: { apiKey?: string; baseURL?: string; model: string } = {
-          model: model ?? DEFAULT_CHAT_MODEL,
+        let model = bodyModel?.trim() || "";
+        let llmConfig: { apiKey?: string; baseURL?: string; model?: string } = {
+          model: model || undefined,
         };
         if (user) {
           const { data: settingsRow } = await supabase
@@ -85,16 +84,30 @@ export async function POST(req: NextRequest) {
           const raw = (settingsRow?.settings as Record<string, LLMModuleConfig>) ?? {};
           const mod = raw.workspace;
           if (mod && (mod.api_key || mod.base_url || mod.model)) {
+            const resolvedModel =
+              model ||
+              (typeof mod.model === "string" ? mod.model.trim() : "") ||
+              "";
             llmConfig = {
               apiKey: mod.api_key || undefined,
               baseURL: mod.base_url || undefined,
-              model: model || mod.model || DEFAULT_CHAT_MODEL,
+              model: resolvedModel || undefined,
             };
           } else if (model) {
             llmConfig = { model };
           }
         }
-        model = llmConfig.model;
+        model = llmConfig.model?.trim() || "";
+
+        if (!model) {
+          send({
+            type: "error",
+            error:
+              "model 未配置：请在“研究工作台/大模型设置”中填写 model，并同时配置 base_url + api_key。",
+          });
+          controller.close();
+          return;
+        }
 
         // 立即发送确认，让前端知道请求已收到
         send({ type: "progress", step: "topic" });

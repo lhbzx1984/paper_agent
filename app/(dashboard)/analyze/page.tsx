@@ -51,6 +51,8 @@ function AnalyzeContent() {
   const [projectId, setProjectId] = useState("");
   const [documents, setDocuments] = useState<Document[]>([]);
   const [documentId, setDocumentId] = useState("");
+  const [analysisMode, setAnalysisMode] = useState<"single" | "multi" | "all">("all");
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [model, setModel] = useState("deepseek-chat");
   const [focus, setFocus] = useState("");
@@ -80,10 +82,13 @@ function AnalyzeContent() {
     if (!projectId) {
       setDocuments([]);
       setDocumentId("");
+      setSelectedDocumentIds([]);
+      setAnalysisMode("all");
       return;
     }
     setDocsLoading(true);
     setDocumentId("");
+    setSelectedDocumentIds([]);
     fetch(`/api/documents?projectId=${projectId}`)
       .then((r) => r.json())
       .then((data) => setDocuments(data.documents ?? []))
@@ -114,32 +119,66 @@ function AnalyzeContent() {
       setHasSaved(null);
       return;
     }
-    const docId = documentId.trim() || undefined;
     const params = new URLSearchParams({ projectId });
-    if (docId) params.set("documentId", docId);
+    if (analysisMode === "single") {
+      const docId = documentId.trim();
+      if (!docId) {
+        setHasSaved(false);
+        return;
+      }
+      params.set("documentId", docId);
+    } else if (analysisMode === "multi") {
+      const ids = selectedDocumentIds.map((d) => d.trim()).filter(Boolean);
+      if (ids.length === 0) {
+        setHasSaved(false);
+        return;
+      }
+      params.set("documentIds", ids.slice().sort().join(","));
+    } // all: 不传 documentId/documentIds
     fetch(`/api/analyze/saved?${params}`)
       .then((r) => r.json())
       .then((data) => setHasSaved(!!data?.data))
       .catch(() => setHasSaved(null));
-  }, [projectId, documentId]);
+  }, [projectId, analysisMode, documentId, selectedDocumentIds]);
 
   async function handleAnalyze() {
     if (!projectId) return;
+    if (analysisMode === "single" && !documentId.trim()) {
+      setError("请选择单篇文献");
+      return;
+    }
+    if (analysisMode === "multi" && selectedDocumentIds.length === 0) {
+      setError("请选择要参与综合的文献");
+      return;
+    }
     setLoading(true);
     setError(null);
     setResult(null);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 300_000);
     try {
+      const payload: {
+        projectId: string;
+        documentId?: string;
+        documentIds?: string[];
+        model: string;
+        focus?: string;
+      } = {
+        projectId,
+        model,
+        focus: focus.trim() || undefined,
+      };
+
+      if (analysisMode === "single") {
+        payload.documentId = documentId.trim() || undefined;
+      } else if (analysisMode === "multi") {
+        payload.documentIds = selectedDocumentIds.map((d) => d.trim()).filter(Boolean);
+      }
+
       const res = await fetch("/api/agent/analyze/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          documentId: documentId.trim() || undefined,
-          model,
-          focus: focus.trim() || undefined,
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
         cache: "no-store",
       });
@@ -358,7 +397,20 @@ function AnalyzeContent() {
     setError(null);
     try {
       const params = new URLSearchParams({ projectId });
-      if (documentId.trim()) params.set("documentId", documentId.trim());
+      if (analysisMode === "single") {
+        if (!documentId.trim()) {
+          setError("请选择单篇文献");
+          return;
+        }
+        params.set("documentId", documentId.trim());
+      } else if (analysisMode === "multi") {
+        const ids = selectedDocumentIds.map((d) => d.trim()).filter(Boolean);
+        if (ids.length === 0) {
+          setError("请选择要参与综合的文献");
+          return;
+        }
+        params.set("documentIds", ids.slice().sort().join(","));
+      }
       const res = await fetch(`/api/analyze/saved?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "加载失败");
@@ -396,7 +448,20 @@ function AnalyzeContent() {
     setError(null);
     try {
       const params = new URLSearchParams({ projectId });
-      if (documentId.trim()) params.set("documentId", documentId.trim());
+      if (analysisMode === "single") {
+        if (!documentId.trim()) {
+          setError("请选择单篇文献");
+          return;
+        }
+        params.set("documentId", documentId.trim());
+      } else if (analysisMode === "multi") {
+        const ids = selectedDocumentIds.map((d) => d.trim()).filter(Boolean);
+        if (ids.length === 0) {
+          setError("请选择要参与综合的文献");
+          return;
+        }
+        params.set("documentIds", ids.slice().sort().join(","));
+      }
       const res = await fetch(`/api/analyze/saved?${params}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "删除失败");
@@ -411,16 +476,51 @@ function AnalyzeContent() {
 
   async function handleSave() {
     if (!result || !projectId) return;
+    if (analysisMode === "single" && !documentId.trim()) {
+      setError("请选择单篇文献");
+      return;
+    }
+    if (analysisMode === "multi" && selectedDocumentIds.length === 0) {
+      setError("请选择要参与综合的文献");
+      return;
+    }
     setSaving(true);
     setSaveSuccess(false);
     try {
+      const selectedDocs = (() => {
+        if (analysisMode === "single") {
+          const d = documents.find((x) => x.id === documentId.trim());
+          return d ? [d] : [];
+        }
+        if (analysisMode === "multi") {
+          const idSet = new Set(selectedDocumentIds);
+          return documents.filter((d) => idSet.has(d.id));
+        }
+        return [];
+      })();
+
+      const documentName = (() => {
+        if (analysisMode === "all") return "全部文档";
+        if (analysisMode === "single") return selectedDocs[0]?.name ?? "单篇文献";
+        const names = selectedDocs.map((d) => d.name).filter(Boolean);
+        return `多篇：${names.slice(0, 6).join("，")}${names.length > 6 ? "…" : ""}`;
+      })();
+
+      const documentIds =
+        analysisMode === "multi"
+          ? selectedDocumentIds.map((d) => d.trim()).filter(Boolean)
+          : undefined;
+
+      const docIdForSave = analysisMode === "single" ? documentId.trim() || null : null;
+
       const res = await fetch("/api/analyze/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
-          documentId: documentId.trim() || null,
-          documentName: documentId ? documents.find((d) => d.id === documentId)?.name : "全部文档",
+          documentId: analysisMode === "all" ? null : docIdForSave,
+          documentIds,
+          documentName,
           innovations: result.innovations,
           researchDirections: result.researchDirections,
           paperStructure: result.paperStructure,
@@ -481,10 +581,32 @@ function AnalyzeContent() {
           )}
         </div>
 
-        {projectId && (
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+            分析范围
+          </label>
+          <select
+            value={analysisMode}
+            onChange={(e) => {
+              const v = e.target.value as "single" | "multi" | "all";
+              setAnalysisMode(v);
+              setError(null);
+              if (v === "single") setSelectedDocumentIds([]);
+              if (v === "multi") setDocumentId("");
+            }}
+            disabled={!projectId}
+            className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-zinc-900 dark:text-zinc-100 disabled:opacity-50"
+          >
+            <option value="all">知识库整体（全部文档）</option>
+            <option value="single">单篇文献</option>
+            <option value="multi">多篇文献综合</option>
+          </select>
+        </div>
+
+        {projectId && analysisMode === "single" && (
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-              选择文档（可选）
+              选择单篇文献
             </label>
             <select
               value={documentId}
@@ -492,7 +614,7 @@ function AnalyzeContent() {
               disabled={docsLoading}
               className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-zinc-900 dark:text-zinc-100"
             >
-              <option value="">全部文档（知识库整体分析）</option>
+              <option value="">请选择单篇文献</option>
               {documents.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
@@ -504,7 +626,7 @@ function AnalyzeContent() {
                 ? "加载文档列表中..."
                 : documents.length === 0
                   ? "该知识库暂无文档，请 "
-                  : "选择单篇文档可针对该文献进行深度分析"}
+                  : "选择单篇文献可针对该文献进行深度分析"}
               {documents.length === 0 && !docsLoading && (
                 <Link
                   href={`/upload?projectId=${projectId}`}
@@ -513,6 +635,77 @@ function AnalyzeContent() {
                   前往知识库上传
                 </Link>
               )}
+            </p>
+          </div>
+        )}
+
+        {projectId && analysisMode === "multi" && (
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+              选择多篇文献（参与综合）
+            </label>
+            <div className="mb-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedDocumentIds(documents.map((d) => d.id))}
+                disabled={docsLoading || documents.length === 0}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+              >
+                全选
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedDocumentIds([])}
+                disabled={docsLoading}
+                className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-3 py-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+              >
+                清空
+              </button>
+            </div>
+            <div className="max-h-56 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2">
+              {docsLoading ? (
+                <p className="text-xs text-zinc-500">加载中...</p>
+              ) : documents.length === 0 ? (
+                <p className="text-xs text-zinc-500">
+                  暂无文档，请{" "}
+                  <Link
+                    href={`/upload?projectId=${projectId}`}
+                    className="text-cyan-600 dark:text-cyan-400 hover:underline"
+                  >
+                    前往上传
+                  </Link>
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {documents.map((d) => {
+                    const checked = selectedDocumentIds.includes(d.id);
+                    return (
+                      <label
+                        key={d.id}
+                        className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-200"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...selectedDocumentIds, d.id]
+                              : selectedDocumentIds.filter((id) => id !== d.id);
+                            setSelectedDocumentIds(next);
+                          }}
+                          className="shrink-0"
+                        />
+                        <span className="truncate">{d.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-zinc-500">
+              {selectedDocumentIds.length > 0
+                ? `已选择 ${selectedDocumentIds.length} 篇文献`
+                : "至少选择 1 篇文献后才能开始分析"}
             </p>
           </div>
         )}
@@ -552,7 +745,12 @@ function AnalyzeContent() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={handleAnalyze}
-            disabled={loading || !projectId}
+            disabled={
+              loading ||
+              !projectId ||
+              (analysisMode === "single" && !documentId.trim()) ||
+              (analysisMode === "multi" && selectedDocumentIds.length === 0)
+            }
             className="rounded-lg bg-zinc-900 dark:bg-zinc-100 px-6 py-2.5 text-sm font-medium text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 disabled:opacity-50"
           >
             {loading ? "分析中..." : "开始分析"}
