@@ -86,7 +86,7 @@ function parseOutline(markdown: string): OutlineSection[] {
 }
 
 export default function WorkspacePage() {
-  const [model, setModel] = useState("deepseek-chat");
+  const [model, setModel] = useState("");
   const [maxLengthSelect, setMaxLengthSelect] = useState("3000");
   const [customMaxLength, setCustomMaxLength] = useState(5000);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
@@ -138,8 +138,15 @@ export default function WorkspacePage() {
       .then((r) => r.json())
       .then((data) => {
         const mod = data.settings?.workspace;
-        const m = typeof mod === "object" ? mod?.model : mod;
-        if (m) setModel(m);
+        if (typeof mod !== "object" || !mod) {
+          setModel("");
+          return;
+        }
+        const base = (mod.base_url ?? "").trim();
+        const key = (mod.api_key ?? "").trim();
+        const m = (mod.model ?? "").trim();
+        if (base && key && m) setModel(m);
+        else setModel("");
       })
       .catch(() => {});
   }, []);
@@ -185,6 +192,10 @@ export default function WorkspacePage() {
   }
 
   function handleGenerateSection() {
+    if (!model.trim()) {
+      setError("请先在“大模型设置”中为“研究工作台”配置 base_url、api_key 和 model");
+      return;
+    }
     const section = sections.find((s) => s.id === selectedSectionId);
     if (!section || !fullOutline) return;
     setError(null);
@@ -504,12 +515,15 @@ export default function WorkspacePage() {
             value={model}
             onChange={(e) => setModel(e.target.value)}
             className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-zinc-900 dark:text-zinc-100"
+            disabled={!model.trim()}
           >
-            {MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
+            {!model.trim() ? (
+              <option value="">未配置（请先去“大模型设置”）</option>
+            ) : (
+              <option value={model}>
+                {MODELS.find((m) => m.id === model)?.name ?? model}
               </option>
-            ))}
+            )}
           </select>
         </div>
 
@@ -617,7 +631,7 @@ export default function WorkspacePage() {
                 <button
                   type="button"
                   onClick={handleGenerateSection}
-                  disabled={isGenerating}
+                  disabled={isGenerating || !model.trim()}
                   className="rounded-lg bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-medium text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 disabled:opacity-50"
                 >
                   {isGenerating ? "生成中..." : "生成"}

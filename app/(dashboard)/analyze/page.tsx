@@ -54,7 +54,7 @@ function AnalyzeContent() {
   const [analysisMode, setAnalysisMode] = useState<"single" | "multi" | "all">("all");
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
-  const [model, setModel] = useState("deepseek-chat");
+  const [model, setModel] = useState("");
   const [focus, setFocus] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,8 +108,15 @@ function AnalyzeContent() {
       .then((r) => r.json())
       .then((data) => {
         const mod = data.settings?.literature_analysis;
-        const m = typeof mod === "object" ? mod?.model : mod;
-        if (m) setModel(m);
+        if (typeof mod !== "object" || !mod) {
+          setModel("");
+          return;
+        }
+        const base = (mod.base_url ?? "").trim();
+        const key = (mod.api_key ?? "").trim();
+        const m = (mod.model ?? "").trim();
+        if (base && key && m) setModel(m);
+        else setModel("");
       })
       .catch(() => {});
   }, []);
@@ -143,6 +150,10 @@ function AnalyzeContent() {
 
   async function handleAnalyze() {
     if (!projectId) return;
+    if (!model.trim()) {
+      setError("请先在“大模型设置”中为“文献分析”配置 base_url、api_key 和 model");
+      return;
+    }
     if (analysisMode === "single" && !documentId.trim()) {
       setError("请选择单篇文献");
       return;
@@ -257,6 +268,10 @@ function AnalyzeContent() {
   }
 
   async function handleGenerateTitles() {
+    if (!model.trim()) {
+      setError("请先在“大模型设置”中为“文献分析”配置 base_url、api_key 和 model");
+      return;
+    }
     if (!result?.improvementSuggestions?.trim()) {
       setError("请先完成分析并填写改进意见与创新点");
       return;
@@ -285,6 +300,10 @@ function AnalyzeContent() {
   }
 
   async function handleGenerateOutline() {
+    if (!model.trim()) {
+      setError("请先在“大模型设置”中为“文献分析”配置 base_url、api_key 和 model");
+      return;
+    }
     const idx = result?.selectedTitleIndex ?? 0;
     const sel = result?.paperTitles?.[idx]?.trim();
     if (!sel) {
@@ -733,12 +752,15 @@ function AnalyzeContent() {
             value={model}
             onChange={(e) => setModel(e.target.value)}
             className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-zinc-900 dark:text-zinc-100"
+            disabled={!model.trim()}
           >
-            {MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
+            {!model.trim() ? (
+              <option value="">未配置（请先去“大模型设置”）</option>
+            ) : (
+              <option value={model}>
+                {MODELS.find((m) => m.id === model)?.name ?? model}
               </option>
-            ))}
+            )}
           </select>
         </div>
 
@@ -748,6 +770,7 @@ function AnalyzeContent() {
             disabled={
               loading ||
               !projectId ||
+              !model.trim() ||
               (analysisMode === "single" && !documentId.trim()) ||
               (analysisMode === "multi" && selectedDocumentIds.length === 0)
             }
@@ -872,7 +895,7 @@ function AnalyzeContent() {
                 <button
                   type="button"
                   onClick={handleGenerateTitles}
-                  disabled={titlesLoading || !result.improvementSuggestions?.trim()}
+                  disabled={titlesLoading || !model.trim() || !result.improvementSuggestions?.trim()}
                   className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
                 >
                   {titlesLoading ? "生成中..." : "生成论文题目"}
@@ -889,7 +912,11 @@ function AnalyzeContent() {
                   <button
                     type="button"
                     onClick={handleGenerateOutline}
-                    disabled={outlineLoading || !(result.paperTitles?.[result.selectedTitleIndex ?? 0]?.trim())}
+                    disabled={
+                      outlineLoading || !model.trim() || !(
+                        result.paperTitles?.[result.selectedTitleIndex ?? 0]?.trim()
+                      )
+                    }
                     className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
                   >
                     {outlineLoading ? "生成中..." : "生成论文大纲"}
