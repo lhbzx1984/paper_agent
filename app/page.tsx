@@ -6,13 +6,18 @@ import { LandingFeatures } from "./landing/landing-features";
 import { LandingCta } from "./landing/landing-cta";
 
 export default async function HomePage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  if (user) {
-    redirect("/dashboard");
+    if (user) {
+      redirect("/dashboard");
+    }
+  } catch {
+    // If Supabase is unavailable (e.g. missing env vars on preview deploy),
+    // fall through and render the landing page for unauthenticated visitors.
   }
 
   return (
