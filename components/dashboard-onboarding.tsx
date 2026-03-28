@@ -9,6 +9,7 @@ import {
 } from "react";
 import Link from "next/link";
 import {
+  BarChart3,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -102,6 +103,19 @@ const STEPS: Step[] = [
     icon: PenLine,
   },
   {
+    id: "data-lab",
+    title: "数据实验分析",
+    description:
+      "对话式智能体：讨论实验设计、统计方法、数据解读与 Python/R 示例；需在「大模型设置」中单独配置「数据实验分析」所用模型。",
+    tips: [
+      "可与文献、论文写作配合使用，侧重定量与实验层面",
+      "涉及高风险决策时请结合领域专家意见",
+    ],
+    href: "/data-lab",
+    linkLabel: "前往数据实验分析",
+    icon: BarChart3,
+  },
+  {
     id: "paper",
     title: "论文检索与导出",
     description: "检索学术文献，并将完成的论文内容导出为 Word、PDF、LaTeX 等格式。",
@@ -113,7 +127,8 @@ const STEPS: Step[] = [
   {
     id: "llm",
     title: "大模型设置",
-    description: "为「文献分析」「研究工作台」「技能调用」分别配置 API（base_url、api_key、model）。未配置时相关功能将无法调用模型。",
+    description:
+      "为「文献分析」「研究工作台」「技能调用」「数据实验分析」分别配置 API（base_url、api_key、model）。未配置时相关功能将无法调用模型。",
     tips: ["各模块可配置不同服务商与模型", "配置保存后立即在对应页面生效"],
     href: "/settings/llm",
     linkLabel: "前往大模型设置",

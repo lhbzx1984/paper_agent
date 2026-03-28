@@ -33,9 +33,37 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user: Awaited<
+    ReturnType<typeof supabase.auth.getUser>
+  >["data"]["user"] = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (err: unknown) {
+    const code =
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      typeof (err as { code?: unknown }).code === "string"
+        ? (err as { code: string }).code
+        : "";
+    // 本地残留 cookie 但 refresh_token 已在服务端失效：清会话并按未登录处理，避免刷屏报错
+    if (code === "refresh_token_not_found") {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        /* noop */
+      }
+      if (process.env.NODE_ENV === "development") {
+        console.info(
+          "[middleware] 已清除无效登录状态（refresh_token_not_found），请重新登录。",
+        );
+      }
+    } else {
+      // Edge 下访问 Supabase 失败（离线、DNS、URL/Key 错误、防火墙等）时避免整站中间件崩溃
+      console.error("[middleware] supabase.auth.getUser failed:", err);
+    }
+  }
 
   const pathname = request.nextUrl.pathname;
 
@@ -47,6 +75,7 @@ export async function updateSession(request: NextRequest) {
     "/analyze",
     "/skills",
     "/workspace",
+    "/data-lab",
     "/paper",
   ];
   const isProtected =

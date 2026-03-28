@@ -15,9 +15,12 @@ export interface LiteratureAnalysisResult {
   innovations?: string;
   researchDirections?: string;
   paperStructure?: string;
+  /** 文献内实验与验证梳理（挖掘，非新设计） */
   experimentAndVerification?: string;
   improvementsOrShortcomings?: string;
   improvementSuggestions?: string;
+  /** 由题目+大纲+文献挖掘生成的本篇论文实验方案（前端/API 单独生成，不经过本文件阶段一） */
+  paperExperimentDesign?: string;
   /** 当无内容时，提示可执行的操作 */
   hintAction?: { type: "clean-and-reupload"; projectId: string };
 }
@@ -47,9 +50,11 @@ const ANALYSIS_PROMPTS = {
   },
   experimentAndVerification: {
     system:
-      "你是实验与验证专家。根据文献中的方法与应用场景，设计实验方案（数据集、基线、评价指标、消融实验等）与验证方案（复现步骤、对比实验、案例分析等），确保研究可验证、可复现。" +
+      "你是科研文献分析专家，任务是从给定文献片段中**分析与挖掘**作者已报告或描述的实验与验证内容。" +
+      "请归纳：实验目的与任务设定、数据/数据集与划分、基线与对比方法、评价指标、消融或敏感性分析（若有）、验证流程与复现要点等。" +
+      "**禁止**脱离文献另行「发明」一套新的实验方法或虚构文献未提及的实验设置；若文献对实验描述不足，须明确说明信息缺口并列出需回到原文核对的问题。" +
       MARKDOWN_INSTRUCTION,
-    task: "设计实验与验证方案",
+    task: "梳理文献内实验与验证内容",
   },
   improvementsOrShortcomings: {
     system:

@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
       paperTitles,
       selectedTitle,
       paperOutline,
+      paperExperimentDesign,
     } = body as {
       projectId?: string;
       documentId?: string | null;
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
       paperTitles?: string[];
       selectedTitle?: string;
       paperOutline?: string;
+      paperExperimentDesign?: string;
     };
 
     if (!projectId?.trim()) {
@@ -114,6 +116,7 @@ export async function POST(req: NextRequest) {
       paper_titles: Array.isArray(paperTitles) ? paperTitles : null,
       selected_title: selectedTitle ?? null,
       paper_outline: paperOutline ?? null,
+      paper_experiment_design: paperExperimentDesign ?? null,
       updated_at: new Date().toISOString(),
     };
 

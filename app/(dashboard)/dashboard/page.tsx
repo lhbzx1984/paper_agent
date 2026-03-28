@@ -72,6 +72,17 @@ export default async function DashboardPage() {
             </p>
           </Link>
           <Link
+            href="/data-lab"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 transition-colors hover:border-zinc-300 dark:hover:border-zinc-700"
+          >
+            <h3 className="font-medium text-zinc-900 dark:text-zinc-50">
+              数据实验分析
+            </h3>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              对话智能体：实验设计、统计方法与数据解读
+            </p>
+          </Link>
+          <Link
             href="/paper"
             className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 transition-colors hover:border-zinc-300 dark:hover:border-zinc-700"
           >

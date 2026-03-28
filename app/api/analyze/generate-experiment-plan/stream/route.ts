@@ -10,7 +10,7 @@ function sse(data: object) {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
-/** 流式生成论文大纲，支持中断 */
+/** 基于题目、大纲与文献内实验挖掘，生成本篇论文的实验与验证设计方案（流式） */
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
         try {
           controller.close();
         } catch {
-          /* already closed */
+          /* noop */
         }
       });
 
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
         try {
           controller.enqueue(encoder.encode(sse(data)));
         } catch {
-          /* stream closed */
+          /* noop */
         }
       };
 
@@ -38,26 +38,29 @@ export async function POST(req: NextRequest) {
         const body = await req.json().catch(() => ({}));
         const {
           selectedTitle,
+          paperOutline,
+          literatureExperimentMining,
           innovations,
           researchDirections,
           paperStructure,
-          experimentAndVerification,
-          improvementsOrShortcomings,
-          improvementSuggestions,
           model,
         } = body as {
           selectedTitle?: string;
+          paperOutline?: string;
+          literatureExperimentMining?: string;
           innovations?: string;
           researchDirections?: string;
           paperStructure?: string;
-          experimentAndVerification?: string;
-          improvementsOrShortcomings?: string;
-          improvementSuggestions?: string;
           model?: string;
         };
 
         if (!selectedTitle?.trim()) {
-          send({ type: "error", error: "请先选择论文题目" });
+          send({ type: "error", error: "请先选择或填写论文题目" });
+          controller.close();
+          return;
+        }
+        if (!paperOutline?.trim()) {
+          send({ type: "error", error: "请先生成论文大纲" });
           controller.close();
           return;
         }
@@ -84,25 +87,36 @@ export async function POST(req: NextRequest) {
           llmConfig = mod as LLMModuleConfig;
         }
 
-        const contextParts: string[] = [`【论文题目】\n${selectedTitle.trim()}`];
-        if (innovations?.trim()) contextParts.push(`【创新点】\n${innovations}`);
-        if (researchDirections?.trim()) contextParts.push(`【研究方向】\n${researchDirections}`);
-        if (paperStructure?.trim()) contextParts.push(`【论文结构】\n${paperStructure}`);
-        if (experimentAndVerification?.trim())
-          contextParts.push(
-            `【文献内实验与验证梳理】（来自文献分析，非新设计的实验）\n${experimentAndVerification}`,
-          );
-        if (improvementsOrShortcomings?.trim())
-          contextParts.push(`【改进方向与不足】\n${improvementsOrShortcomings}`);
-        if (improvementSuggestions?.trim())
-          contextParts.push(`【改进意见与创新点】\n${improvementSuggestions}`);
-
         const MARKDOWN_INSTRUCTION =
-          "请使用 Markdown 格式输出，包括标题（##）、有序/无序列表（- 或 1.）、加粗（**）等，使结构清晰易读。";
+          "请使用 Markdown 格式输出，包括标题（##）、有序/无序列表（- 或 1.）、加粗（**）等。";
+
+        const parts: string[] = [
+          `【论文题目】\n${selectedTitle.trim()}`,
+          `【论文大纲】\n${paperOutline.trim()}`,
+        ];
+        if (literatureExperimentMining?.trim()) {
+          parts.push(
+            `【文献内实验与验证梳理】（仅供对齐与继承，勿逐字复述）\n${literatureExperimentMining.trim().slice(0, 12000)}`,
+          );
+        }
+        if (innovations?.trim()) {
+          parts.push(`【创新点摘要】\n${innovations.trim().slice(0, 6000)}`);
+        }
+        if (researchDirections?.trim()) {
+          parts.push(`【研究方向摘要】\n${researchDirections.trim().slice(0, 4000)}`);
+        }
+        if (paperStructure?.trim()) {
+          parts.push(`【论文结构参考】\n${paperStructure.trim().slice(0, 4000)}`);
+        }
+
         const system =
-          "你是论文结构设计专家。根据选定的论文题目及文献分析结果，给出完整论文大纲，包括各章节标题、子节与写作要点，层次清晰。" +
+          "你是实验设计与方法论专家。用户已确定拟撰写论文的题目与大纲，并提供了从参考文献中梳理出的实验与验证要点。" +
+          "请**针对该题目与大纲**，撰写一份「本篇论文」的实验与验证设计方案：包括研究问题与假设、数据与任务、基线与对比、评价指标、消融/稳健性（如适用）、验证步骤与可复现性说明。" +
+          "方案须与大纲章节逻辑一致，可合理延伸文献思路，但应明确区分「继承自文献的设定」与「本篇论文计划新增或调整的部分」。" +
+          "**禁止**凭空编造具体数据集名称或实验数值；若需占位请用通用表述并标注待填。" +
           MARKDOWN_INSTRUCTION;
-        const prompt = `【分析内容】\n${contextParts.join("\n\n---\n\n")}\n\n请基于以上论文题目与分析内容，生成完整论文大纲。注意：其中的「文献内实验与验证梳理」仅反映参考文献中的实验描述，用于对齐写作方向；若需撰写本篇论文的独立实验方案，请在生成大纲后使用「生成论文实验与验证设计方案」功能另行生成。`;
+
+        const prompt = `【输入材料】\n\n${parts.join("\n\n---\n\n")}\n\n请输出《实验与验证设计方案》，面向「${selectedTitle.trim()}」这一篇论文的写作与实施。`;
 
         send({ type: "start" });
 
@@ -112,7 +126,7 @@ export async function POST(req: NextRequest) {
           prompt,
           model: model || llmConfig?.model,
           apiKey: llmConfig?.api_key,
-          baseURL: (llmConfig as { base_url?: string })?.base_url,
+          baseURL: llmConfig?.base_url,
         })) {
           if (aborted) break;
           full += chunk;
@@ -120,24 +134,26 @@ export async function POST(req: NextRequest) {
         }
 
         if (!aborted) {
-          send({ type: "done", outline: full.trim() });
+          send({ type: "done", content: full });
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "生成失败";
-        console.error("[论文大纲流式]", msg, err);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "生成失败";
         send({ type: "error", error: msg });
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          /* noop */
+        }
       }
     },
   });
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/event-stream",
+      "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
     },
   });
 }

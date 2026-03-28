@@ -10,12 +10,14 @@ const MODULE_LABELS: Record<LLMModuleKey, string> = {
   literature_analysis: "文献分析",
   workspace: "研究工作台",
   skills: "技能调用（主题生成、关键词等）",
+  data_lab: "数据实验分析（对话智能体）",
 };
 
 const DEFAULT_CONFIG: LLMModuleConfig = {
   base_url: "",
   api_key: "",
   model: "",
+  model_reasoner: "",
 };
 
 export default function LLMSettingsPage() {
@@ -90,6 +92,7 @@ export default function LLMSettingsPage() {
       literature_analysis: { ...DEFAULT_CONFIG },
       workspace: { ...DEFAULT_CONFIG },
       skills: { ...DEFAULT_CONFIG },
+      data_lab: { ...DEFAULT_CONFIG },
     });
     setError(null);
     setSuccess(false);
@@ -107,6 +110,7 @@ export default function LLMSettingsPage() {
     literature_analysis: { ...DEFAULT_CONFIG },
     workspace: { ...DEFAULT_CONFIG },
     skills: { ...DEFAULT_CONFIG },
+    data_lab: { ...DEFAULT_CONFIG },
   };
 
   return (
@@ -116,7 +120,7 @@ export default function LLMSettingsPage() {
           大模型设置
         </h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          为不同功能模块配置 `base_url`、`api_key` 和 `model`。如果相关字段为空，文献分析/研究工作台/技能调用将无法正常工作。
+          为不同功能模块配置 `base_url`、`api_key` 和 `model`。如果相关字段为空，文献分析/研究工作台/技能调用/数据实验分析将无法正常工作。
         </p>
       </div>
 
@@ -180,7 +184,9 @@ export default function LLMSettingsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                  model
+                  {key === "data_lab"
+                    ? "model（对话模型，如 deepseek-chat）"
+                    : "model"}
                 </label>
                 <input
                   type="text"
@@ -191,6 +197,41 @@ export default function LLMSettingsPage() {
                   className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-zinc-900 dark:text-zinc-100"
                 />
               </div>
+              {key === "data_lab" && (
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                    model（深度思考模型，如 deepseek-reasoner）
+                  </label>
+                  <input
+                    type="text"
+                    value={currentSettings.data_lab?.model_reasoner ?? ""}
+                    onChange={(e) =>
+                      updateModule("data_lab", "model_reasoner", e.target.value)
+                    }
+                    placeholder="留空且 base_url 为 DeepSeek 时默认 deepseek-reasoner"
+                    className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-zinc-900 dark:text-zinc-100"
+                  />
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    DeepSeek 与 OpenAI 兼容：base_url 可用{" "}
+                    <code className="text-zinc-600 dark:text-zinc-300">
+                      https://api.deepseek.com
+                    </code>{" "}
+                    或{" "}
+                    <code className="text-zinc-600 dark:text-zinc-300">
+                      https://api.deepseek.com/v1
+                    </code>
+                    。对话模型 / 深度思考模型对应{" "}
+                    <code className="text-zinc-600 dark:text-zinc-300">
+                      deepseek-chat
+                    </code>{" "}
+                    与{" "}
+                    <code className="text-zinc-600 dark:text-zinc-300">
+                      deepseek-reasoner
+                    </code>
+                    （V3.2，128K 上下文）。
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         ))}

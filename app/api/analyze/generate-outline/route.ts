@@ -65,14 +65,17 @@ export async function POST(req: NextRequest) {
     if (innovations?.trim()) contextParts.push(`【创新点】\n${innovations}`);
     if (researchDirections?.trim()) contextParts.push(`【研究方向】\n${researchDirections}`);
     if (paperStructure?.trim()) contextParts.push(`【论文结构】\n${paperStructure}`);
-    if (experimentAndVerification?.trim()) contextParts.push(`【实验设计与验证】\n${experimentAndVerification}`);
+    if (experimentAndVerification?.trim())
+      contextParts.push(
+        `【文献内实验与验证梳理】（来自文献分析）\n${experimentAndVerification}`,
+      );
     if (improvementsOrShortcomings?.trim()) contextParts.push(`【改进方向与不足】\n${improvementsOrShortcomings}`);
     if (improvementSuggestions?.trim()) contextParts.push(`【改进意见与创新点】\n${improvementSuggestions}`);
 
     const system =
       "你是论文结构设计专家。根据选定的论文题目及文献分析结果，给出完整论文大纲，包括各章节标题、子节与写作要点，层次清晰。" +
       MARKDOWN_INSTRUCTION;
-    const prompt = `【分析内容】\n${contextParts.join("\n\n---\n\n")}\n\n请基于以上论文题目与分析内容，生成完整论文大纲。`;
+    const prompt = `【分析内容】\n${contextParts.join("\n\n---\n\n")}\n\n请基于以上论文题目与分析内容，生成完整论文大纲。「文献内实验与验证梳理」仅反映参考文献中的实验描述；本篇论文的独立实验方案可在生成大纲后另行生成。`;
 
     const outline = await generateText({
       system,

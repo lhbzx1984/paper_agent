@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 
@@ -28,8 +28,12 @@ interface AnalysisResult {
   paperTitles?: string[];
   selectedTitleIndex?: number;
   paperOutline?: string;
+  /** 基于题目、大纲与文献挖掘生成的本篇论文实验与验证设计方案 */
+  paperExperimentDesign?: string;
   hintAction?: { type: "clean-and-reupload"; projectId: string };
 }
+
+const DATA_LAB_SCHEME_IMPORT_KEY = "sra_data_lab_pending_scheme";
 
 const MODELS = [
   { id: "deepseek-chat", name: "DeepSeek Chat" },
@@ -40,12 +44,18 @@ const SECTIONS = [
   { key: "innovations", title: "创新点", desc: "挖掘文献中的方法、技术、理论、应用创新", editable: false },
   { key: "researchDirections", title: "研究方向", desc: "提炼可探索的研究空白与未来工作", editable: false },
   { key: "paperStructure", title: "论文结构", desc: "设计适合该领域的新论文框架", editable: false },
-  { key: "experimentAndVerification", title: "实验设计与验证", desc: "实验方案与验证方案", editable: false },
+  {
+    key: "experimentAndVerification",
+    title: "文献内实验与验证梳理",
+    desc: "从文献中挖掘已报告的实验设置、数据、指标与验证方式（不另造新方法）",
+    editable: false,
+  },
   { key: "improvementsOrShortcomings", title: "改进方向与不足", desc: "文献可改进方向与现有不足", editable: true },
   { key: "improvementSuggestions", title: "改进意见与创新点", desc: "基于分析的具体改进建议和创新点", editable: true },
 ] as const;
 
 function AnalyzeContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
@@ -67,6 +77,8 @@ function AnalyzeContent() {
   const [titlesLoading, setTitlesLoading] = useState(false);
   const [outlineLoading, setOutlineLoading] = useState(false);
   const outlineAbortRef = useRef<AbortController | null>(null);
+  const [experimentPlanLoading, setExperimentPlanLoading] = useState(false);
+  const experimentPlanAbortRef = useRef<AbortController | null>(null);
   const resultAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -410,6 +422,124 @@ function AnalyzeContent() {
     setResult((prev) => (prev ? { ...prev, paperOutline: value } : null));
   }
 
+  function updatePaperExperimentDesign(value: string) {
+    setResult((prev) => (prev ? { ...prev, paperExperimentDesign: value } : null));
+  }
+
+  function handleAbortExperimentPlan() {
+    experimentPlanAbortRef.current?.abort();
+  }
+
+  async function handleGenerateExperimentPlan() {
+    if (!model.trim()) {
+      setError("请先在“大模型设置”中为“文献分析”配置 base_url、api_key 和 model");
+      return;
+    }
+    const idx = result?.selectedTitleIndex ?? 0;
+    const sel = result?.paperTitles?.[idx]?.trim();
+    if (!sel) {
+      setError("请先选择并填写论文题目");
+      return;
+    }
+    if (!result?.paperOutline?.trim()) {
+      setError("请先生成论文大纲");
+      return;
+    }
+    experimentPlanAbortRef.current?.abort();
+    experimentPlanAbortRef.current = new AbortController();
+    setExperimentPlanLoading(true);
+    setError(null);
+    setResult((prev) => (prev ? { ...prev, paperExperimentDesign: "" } : null));
+    try {
+      const res = await fetch("/api/analyze/generate-experiment-plan/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selectedTitle: sel,
+          paperOutline: result.paperOutline,
+          literatureExperimentMining: result.experimentAndVerification,
+          innovations: result?.innovations,
+          researchDirections: result?.researchDirections,
+          paperStructure: result?.paperStructure,
+          model,
+        }),
+        signal: experimentPlanAbortRef.current.signal,
+        cache: "no-store",
+      });
+      if (!res.ok || !res.body) {
+        const raw = await res.text();
+        let data: { error?: string };
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch {
+          throw new Error(`生成失败 (${res.status})`);
+        }
+        throw new Error(data.error ?? "生成失败");
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const ev = JSON.parse(line.slice(6)) as {
+              type: string;
+              text?: string;
+              content?: string;
+              error?: string;
+            };
+            if (ev.type === "chunk" && typeof ev.text === "string") {
+              setResult((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      paperExperimentDesign: (prev.paperExperimentDesign ?? "") + ev.text,
+                    }
+                  : null
+              );
+            }
+            if (ev.type === "done" && typeof ev.content === "string") {
+              setResult((prev) =>
+                prev ? { ...prev, paperExperimentDesign: ev.content } : null
+              );
+            }
+            if (ev.type === "error" && ev.error) throw new Error(ev.error);
+          } catch (e) {
+            if (e instanceof SyntaxError) continue;
+            throw e;
+          }
+        }
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") {
+        setError("已中断");
+      } else {
+        setError(e instanceof Error ? e.message : "生成失败");
+      }
+    } finally {
+      setExperimentPlanLoading(false);
+      experimentPlanAbortRef.current = null;
+    }
+  }
+
+  function handleImportExperimentPlanToDataLab() {
+    const text = result?.paperExperimentDesign?.trim();
+    if (!text) return;
+    try {
+      sessionStorage.setItem(DATA_LAB_SCHEME_IMPORT_KEY, text);
+    } catch {
+      setError("无法写入浏览器存储，请检查隐私模式设置");
+      return;
+    }
+    router.push("/data-lab");
+  }
+
   async function handleLoadSaved() {
     if (!projectId) return;
     setLoadSavedLoading(true);
@@ -451,6 +581,7 @@ function AnalyzeContent() {
             ? Math.max(0, d.paperTitles.indexOf(d.selectedTitle))
             : 0,
         paperOutline: d.paperOutline ?? "",
+        paperExperimentDesign: d.paperExperimentDesign ?? "",
       });
       resultAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
@@ -549,6 +680,7 @@ function AnalyzeContent() {
           paperTitles: result.paperTitles,
           selectedTitle: result.paperTitles?.[result.selectedTitleIndex ?? 0] ?? null,
           paperOutline: result.paperOutline,
+          paperExperimentDesign: result.paperExperimentDesign,
         }),
       });
       const data = await res.json();
@@ -569,7 +701,7 @@ function AnalyzeContent() {
           文献分析
         </h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          分析选中文献的创新点、研究方向、论文结构、实验设计与验证、改进方向与不足、改进意见与创新点。改进方向与不足、改进意见与创新点可编辑并保存，供研究工作台调用
+          分析选中文献的创新点、研究方向、论文结构、文献内实验梳理、改进方向与不足、改进意见与创新点。生成题目与大纲后，可生成本篇论文的实验与验证设计方案并导入数据实验分析。改进方向与不足、改进意见与创新点可编辑并保存，供研究工作台调用
         </p>
       </div>
 
@@ -948,6 +1080,61 @@ function AnalyzeContent() {
                     rows={16}
                     className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 font-mono whitespace-pre-wrap"
                     disabled={outlineLoading}
+                  />
+                )}
+              </div>
+              <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
+                <h3 className="font-medium text-zinc-900 dark:text-zinc-50 mb-1">
+                  论文实验与验证设计方案
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+                  在已有题目、大纲及「文献内实验梳理」基础上，生成本篇拟撰写论文的实验与验证设计；可编辑、保存，并导入数据实验分析以辅助代码实现。
+                </p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <button
+                    type="button"
+                    onClick={handleGenerateExperimentPlan}
+                    disabled={
+                      experimentPlanLoading ||
+                      !model.trim() ||
+                      !result.paperTitles?.[result.selectedTitleIndex ?? 0]?.trim() ||
+                      !result.paperOutline?.trim()
+                    }
+                    className="rounded-lg border border-zinc-300 dark:border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    {experimentPlanLoading ? "生成中..." : "生成论文实验与验证设计方案"}
+                  </button>
+                  {experimentPlanLoading && (
+                    <button
+                      type="button"
+                      onClick={handleAbortExperimentPlan}
+                      className="rounded-lg border border-red-300 dark:border-red-700 px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
+                    >
+                      中断
+                    </button>
+                  )}
+                  {result.paperExperimentDesign?.trim() && !experimentPlanLoading && (
+                    <button
+                      type="button"
+                      onClick={handleImportExperimentPlanToDataLab}
+                      className="rounded-lg border border-cyan-600 dark:border-cyan-500 px-4 py-2 text-sm font-medium text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/30"
+                    >
+                      导入到数据实验分析
+                    </button>
+                  )}
+                </div>
+                {(result.paperExperimentDesign !== undefined || experimentPlanLoading) && (
+                  <textarea
+                    value={result.paperExperimentDesign ?? ""}
+                    onChange={(e) => updatePaperExperimentDesign(e.target.value)}
+                    placeholder={
+                      experimentPlanLoading
+                        ? "生成中，可点击「中断」停止..."
+                        : "生成的本篇论文实验与验证设计方案（Markdown）"
+                    }
+                    rows={14}
+                    className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 font-mono whitespace-pre-wrap"
+                    disabled={experimentPlanLoading}
                   />
                 )}
               </div>

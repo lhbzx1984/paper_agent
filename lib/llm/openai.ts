@@ -27,6 +27,17 @@ function getClient(config?: LLMConfig): OpenAI | null {
   return new OpenAI({ apiKey: key, baseURL: base });
 }
 
+/** 与 {@link getClient} 相同，但未配置时抛出（供需要 Chat Completions 非流式调用的场景） */
+export function requireLLMClient(config: LLMConfig): OpenAI {
+  const client = getClient(config);
+  if (!client) {
+    throw new Error(
+      "请在对应模块的‘大模型设置’中填写 api_key 和 base_url（不再使用环境变量回退）。",
+    );
+  }
+  return client;
+}
+
 export async function generateText(params: {
   system: string;
   prompt: string;
@@ -118,6 +129,77 @@ export async function* generateTextStream(
     if (!_noRetry && isTimeoutError(e)) {
       full = "";
       for await (const t of generateTextStream({
+        ...params,
+        _noRetry: true,
+      })) {
+        full += t;
+        yield t;
+      }
+      return full;
+    }
+    throw e;
+  }
+  return full;
+}
+
+/** 多轮对话流式输出（messages 须含 system，或仅 user/assistant 由调用方拼接 system） */
+export async function* generateChatCompletionStream(
+  params: {
+    messages: { role: "system" | "user" | "assistant"; content: string }[];
+    model?: string;
+    apiKey?: string;
+    baseURL?: string;
+  } & { _noRetry?: boolean },
+): AsyncGenerator<string, string, unknown> {
+  const client = getClient({ apiKey: params.apiKey, baseURL: params.baseURL });
+  if (!client) {
+    throw new Error(
+      "请在对应模块的‘大模型设置’中填写 api_key 和 base_url（不再使用环境变量回退）。",
+    );
+  }
+
+  const model = params.model?.trim();
+  if (!model) {
+    throw new Error("请在对应模块的‘大模型设置’中填写 model（不再使用默认模型）。");
+  }
+
+  const msgs = params.messages.filter(
+    (m) => m.content?.trim() && ["system", "user", "assistant"].includes(m.role),
+  );
+  if (msgs.length === 0) {
+    throw new Error("messages 不能为空");
+  }
+
+  const { _noRetry } = params;
+  let full = "";
+
+  const doStream = async function* () {
+    const stream = await client!.chat.completions.create({
+      model,
+      messages: msgs.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      const text = chunk.choices[0]?.delta?.content ?? "";
+      if (text) {
+        full += text;
+        yield text;
+      }
+    }
+  };
+
+  try {
+    for await (const t of doStream()) {
+      yield t;
+    }
+  } catch (e) {
+    if (!_noRetry && isTimeoutError(e)) {
+      full = "";
+      for await (const t of generateChatCompletionStream({
         ...params,
         _noRetry: true,
       })) {

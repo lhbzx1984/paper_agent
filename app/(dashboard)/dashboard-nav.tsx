@@ -12,6 +12,7 @@ const navItems = [
   { href: "/analyze", label: "文献分析" },
   { href: "/skills", label: "技能市场" },
   { href: "/workspace", label: "研究工作台" },
+  { href: "/data-lab", label: "数据实验分析" },
   { href: "/paper", label: "论文导出" },
   { href: "/settings/llm", label: "大模型设置" },
 ];

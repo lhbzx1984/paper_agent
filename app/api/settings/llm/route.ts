@@ -3,24 +3,32 @@ import { createClient } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
 
-export type LLMModuleKey = "literature_analysis" | "workspace" | "skills";
+export type LLMModuleKey =
+  | "literature_analysis"
+  | "workspace"
+  | "skills"
+  | "data_lab";
 
 export interface LLMModuleConfig {
   base_url?: string;
   api_key?: string;
   model?: string;
+  /** 思考模式模型（如 DeepSeek `deepseek-reasoner`），仅数据实验分析等场景使用 */
+  model_reasoner?: string;
 }
 
 export const DEFAULT_LLM_MODULE_CONFIG: LLMModuleConfig = {
   base_url: "",
   api_key: "",
   model: "",
+  model_reasoner: "",
 };
 
 export const DEFAULT_LLM_SETTINGS: Record<LLMModuleKey, LLMModuleConfig> = {
   literature_analysis: { ...DEFAULT_LLM_MODULE_CONFIG },
   workspace: { ...DEFAULT_LLM_MODULE_CONFIG },
   skills: { ...DEFAULT_LLM_MODULE_CONFIG },
+  data_lab: { ...DEFAULT_LLM_MODULE_CONFIG },
 };
 
 function mergeModuleConfig(
@@ -35,6 +43,7 @@ function mergeModuleConfig(
     base_url: stored.base_url || defaults.base_url,
     api_key: stored.api_key ?? defaults.api_key,
     model: stored.model || defaults.model,
+    model_reasoner: stored.model_reasoner ?? defaults.model_reasoner ?? "",
   };
 }
 
@@ -72,6 +81,10 @@ export async function GET() {
       skills: mergeModuleConfig(
         raw.skills as LLMModuleConfig | string,
         DEFAULT_LLM_SETTINGS.skills
+      ),
+      data_lab: mergeModuleConfig(
+        raw.data_lab as LLMModuleConfig | string,
+        DEFAULT_LLM_SETTINGS.data_lab
       ),
     };
 

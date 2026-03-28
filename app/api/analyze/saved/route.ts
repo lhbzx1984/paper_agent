@@ -80,6 +80,7 @@ export async function GET(req: NextRequest) {
         paperTitles: Array.isArray(data.paper_titles) ? data.paper_titles : [],
         selectedTitle: data.selected_title,
         paperOutline: data.paper_outline,
+        paperExperimentDesign: data.paper_experiment_design,
         updatedAt: data.updated_at,
       },
     });
